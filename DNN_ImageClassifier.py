@@ -48,19 +48,21 @@ class Model:
     self.learning_rate = parameters['learning_rate']
     self.num_iters = parameters['num_iters'] 
     self.layers = parameters['layers']
+    self.keep_prob = parameters['keep_prob']
+
+    # Checks if dropout regularization is to be used 
+    self.use_dropout = True
 
     # Used for storing interim results 
     self.cache = []
     # Parameters of different layers in the network 
     self.parameters = {}
-
     # Initalize the parameters 
     self.initialize_parameters()
-
     # The growth rate of the cost function 
     self.growth_rate = None
     # Store the cost history 
-    self.J_hist = []
+    self.J_hist = []  
 
   # Helper functions 
   def sigmoid(self, Z): 
@@ -80,7 +82,7 @@ class Model:
   # Initialize parameters 
   def initialize_parameters(self):
     for i in range(1, len(self.layers)): 
-      self.parameters['W'+str(i)] = np.random.randn(self.layers[i], self.layers[i-1]) * 0.1
+      self.parameters['W'+str(i)] = np.random.randn(self.layers[i], self.layers[i-1])*np.sqrt(2/self.layers[i-1])
       self.parameters['b'+str(i)] = np.zeros((self.layers[i], 1))
   
   # Feed forward algorithm 
@@ -99,10 +101,25 @@ class Model:
       A_prev = A
       Z = np.dot(self.parameters['W'+str(i)], A_prev) + self.parameters['b'+str(i)]
       A = self.relu(Z)
-      self.cache.append({
-        'A': A, 
-        'Z': Z
-      })
+      if self.use_dropout is True: 
+        # Initialize new dropout matrix with values between 0 and 1 
+        D = np.random.rand(A.shape[0], A.shape[1])
+        # Convert the values of D to 0 and 1 with keep_prob[i] as the threshold
+        D = D < self.keep_prob[i]
+        # Shut down neurons of A
+        A = A * D
+        # Scale the values of A to get the same expected value
+        A = A/self.keep_prob[i] 
+        self.cache.append({
+          'A': A, 
+          'Z': Z, 
+          'D': D
+        })
+      else: 
+        self.cache.append({
+          'A': A, 
+          'Z': Z
+        })
     # Calculate the output 
     Z_output = np.dot(self.parameters['W'+str(L)], A) + self.parameters['b'+str(L)]
     A_output = self.sigmoid(Z_output)
@@ -112,7 +129,6 @@ class Model:
     })
     return A_output
    
-
   # Results the cost of the predictions
   def computeCost(self, y, predictions):
     m = y.shape[1]
@@ -141,6 +157,11 @@ class Model:
     # Calculate the grads for the rest of the layers
     for i in reversed(range(1, L)): 
       dA = da_prev
+      if self.use_dropout is True and self.keep_prob[i] != 1: 
+        # Apply the mask D[i] to shut down same neurons in back prop
+        dA = dA * self.cache[i]['D']
+        # Scale the values of neurons that have not been shut down 
+        dA = dA/self.keep_prob[i] 
       dZ = dA * self.drelu(self.cache[i]['Z'])
       dW = 1./m * np.dot(dZ, self.cache[i-1]['A'].T)
       db = 1/m * np.sum(dZ, axis = 1, keepdims = True)
@@ -155,6 +176,7 @@ class Model:
     for i in range(self.num_iters):
       # Get the predictions
       predictions = self.feed_forward(X)
+      if i%50 == 0: print(predictions)
       # Compute the total cost of the predictions 
       cost = self.computeCost(y, predictions)
       # Compute the gradients 
@@ -184,7 +206,10 @@ class Model:
     return prediction.astype(int)
 
   # Calculate the training set accuracy 
-  def getAccuracy(self, X, y, isFlat = True): 
+  def getAccuracy(self, X, y, useDropout ,isFlat = True): 
+    if useDropout is False: 
+      # Turn off dropout
+      self.use_dropout = False
     if isFlat is False: 
       m = X.shape[0]  
       # Flatten the matrix
@@ -208,22 +233,24 @@ class Model:
     plt.title('Cost function history')
     plt.savefig('Ok.png')
 
-# Two layer neural network 
 layer_dims = [n, 20, 7, 5, 1]
+# Stores the dropout probabilities 
+keep_prob = [1, 0.86, 1, 0.96, 1]
 # Define a new model 
 model = Model({
   'layers': layer_dims, 
-  'learning_rate': 0.008,
-  'num_iters': 1000
+  'learning_rate': 0.0075,
+  'num_iters': 4000, 
+  'keep_prob': keep_prob # Dropout probabilities
 })
 
 model.train(X_flatten, y)
 # Get the training accuracy
-training_accuracy = model.getAccuracy(X_flatten, y)
+training_accuracy = model.getAccuracy(X_flatten, y, True)
 # Print the training accuracy with 2 decimal places
 print('The training accuracy is: ' + str(setPrecision(training_accuracy, 2)) + '%')
 # Get the test accuracy 
-test_accuracy = model.getAccuracy(X_test, y_test, False)
+test_accuracy = model.getAccuracy(X_test, y_test, False, False)
 # Print the test accuracy with 2 decimal places
 print('The test accuracy is: ' + str(setPrecision(test_accuracy, 2)) + '%')
 # Plot the final cost
